@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>幸运抽奖</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%23ff7ab8'/></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    background:
+      radial-gradient(1100px 640px at 37% 24%, rgba(106,92,255,.50), transparent 62%),
+      radial-gradient(950px 600px at 86% 58%, rgba(152,66,232,.36), transparent 64%),
+      radial-gradient(780px 500px at 8% 82%, rgba(64,98,235,.40), transparent 66%),
+      linear-gradient(180deg, #1a1159 0%, #231a6f 40%, #110c48 74%, #0a0736 100%);
+    user-select: none;
+  }
+  /* 地面反光 */
+  body::after {
+    content: ''; position: fixed; left: 0; right: 0; bottom: 0; height: 24%;
+    background:
+      radial-gradient(55% 90% at 37% 100%, rgba(80,100,255,.28), transparent 72%),
+      linear-gradient(180deg, transparent, rgba(5,3,26,.8));
+    pointer-events: none;
+  }
+  #confetti { position: fixed; inset: 0; pointer-events: none; z-index: 50; }
+
+  /* ============ 舞台（1600x900 基准，整体缩放） ============ */
+  .stage { position: absolute; left: 50%; top: 50%; width: 1600px; height: 900px;
+    transform: translate(-50%, -50%) scale(var(--s, 1)); }
+
+  /* 后方放射光束（静态一次性光栅化，不旋转，避免超大锥形渐变图层逐帧重绘） */
+  .rays { position: absolute; left: 590px; top: 380px; width: 940px; height: 940px;
+    transform: translate(-50%, -50%); pointer-events: none; opacity: .55;
+    background: repeating-conic-gradient(from 0deg, rgba(255,255,255,.10) 0deg 5deg, transparent 5deg 16deg);
+    -webkit-mask-image: radial-gradient(closest-side, rgba(0,0,0,.95), transparent 72%);
+    mask-image: radial-gradient(closest-side, rgba(0,0,0,.95), transparent 72%);
+  }
+  /* 顶部斜射光柱（径向渐变模拟柔光，无 blur 滤镜；动画仅 opacity=合成友好） */
+  .beam { position: absolute; top: -260px; width: 300px; height: 1200px; pointer-events: none;
+    background: radial-gradient(closest-side, rgba(185,205,255,.38), rgba(185,205,255,.16) 55%, transparent 75%);
+    animation: beamPulse 5s ease-in-out infinite;
+  }
+  .beam.l { left: 40px; transform: rotate(24deg); }
+  .beam.r { right: 40px; transform: rotate(-24deg); animation-delay: 2.4s; }
+  @keyframes beamPulse { 0%,100% { opacity:.55; } 50% { opacity:1; } }
+
+  /* ---------- 标题 ---------- */
+  header { position: absolute; top: 18px; left: 0; right: 0; text-align: center; z-index: 5; }
+  .title-row { display: flex; align-items: center; justify-content: center; gap: 30px; }
+  .title-row h1 {
+    font-size: 80px; font-weight: 900; letter-spacing: 18px; line-height: 1.1;
+    background: linear-gradient(180deg, #fffbe6 0%, #ffe487 35%, #f5b93d 55%, #b97a12 80%, #ffd96e 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 4px 0 #8a5200) drop-shadow(0 10px 20px rgba(0,0,10,.7));
+  }
+  .laurel { width: 80px; height: 128px; filter: drop-shadow(0 3px 8px rgba(0,0,10,.6)); }
+  .laurel.r { transform: scaleX(-1); }
+  .subtitle {
+    margin-top: 14px; display: flex; align-items: center; justify-content: center; gap: 16px;
+    color: #f0f3ff; font-size: 22px; letter-spacing: 5px; font-weight: 600;
+    text-shadow: 0 2px 8px rgba(0,0,20,.7);
+  }
+  .subtitle .line { width: 150px; height: 2px; background: linear-gradient(90deg, transparent, #ffd75e); }
+  .subtitle .line.r { background: linear-gradient(90deg, #ffd75e, transparent); }
+  .subtitle .dot { width: 8px; height: 8px; border-radius: 50%; background: #ffd75e; box-shadow: 0 0 10px #ffd75e; }
+
+  /* ---------- 抽奖机（以球心为原点） ---------- */
+  .machine { position: absolute; left: 590px; top: 390px; width: 0; height: 0; z-index: 3; }
+  .machine.rolling { will-change: transform; animation: shake .14s linear infinite; }
+  @keyframes shake { 0%,100% { transform: translate(0,0); } 25% { transform: translate(1.5px,-1px); } 50% { transform: translate(-1px,1px); } 75% { transform: translate(1px,1.5px); } }
+  .floor-glow { position: absolute; left: -300px; top: 350px; width: 600px; height: 100px; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(70,140,255,.45), transparent 75%); filter: blur(10px); z-index: 0; }
+
+  /* 金属支撑臂（铬金属质感） */
+  .arm { position: absolute; top: -72px; width: 26px; height: 254px; border-radius: 14px; z-index: 1;
+    background: linear-gradient(90deg, #454d63, #c9d3e6 28%, #ffffff 44%, #8f9cb8 62%, #39415a);
+    box-shadow: 0 12px 24px rgba(0,0,25,.5);
+  }
+  .arm::before { content: ''; position: absolute; left: 50%; top: -20px; width: 42px; height: 42px;
+    transform: translateX(-50%); border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, #ffffff, #c3cdde 40%, #6b7794 75%, #2c3346);
+    box-shadow: 0 6px 12px rgba(0,0,25,.55);
+  }
+  .arm.l { left: -238px; }
+  .arm.r { left: 212px; }
+
+  /* 玻璃球 */
+  .sphere { position: absolute; left: -220px; top: -220px; width: 440px; height: 440px; border-radius: 50%; z-index: 2;
+    background:
+      radial-gradient(circle at 30% 24%, rgba(255,255,255,.50), rgba(255,255,255,.07) 24%, transparent 42%),
+      radial-gradient(circle at 70% 76%, rgba(140,170,255,.16), transparent 46%),
+      radial-gradient(circle at 50% 50%, rgba(150,175,255,.05), rgba(100,135,255,.12) 66%, rgba(60,90,220,.32) 100%);
+    border: 2.5px solid rgba(216,229,255,.55);
+    box-shadow:
+      inset 0 0 80px rgba(140,170,255,.42),
+      inset -32px -42px 92px rgba(50,80,230,.36),
+      inset 26px 28px 64px rgba(255,255,255,.15),
+      0 0 90px rgba(110,140,255,.5),
+      0 32px 70px rgba(0,0,30,.6);
+  }
+  /* 滚动增亮光晕：独立层 + 仅过渡 opacity（GPU 合成，避免逐帧重绘大模糊阴影） */
+  .sphere-glow { position: absolute; left: -228px; top: -228px; width: 456px; height: 456px; border-radius: 50%;
+    pointer-events: none; opacity: 0; transition: opacity .4s;
+    box-shadow: 0 0 120px rgba(120,155,255,.6); }
+  .machine.rolling .sphere-glow { opacity: 1; }
+  .hl-streak { position: absolute; left: 8%; top: 6%; width: 46%; height: 26%; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255,255,255,.55), transparent 70%);
+    filter: blur(3px); transform: rotate(-28deg); z-index: 5; pointer-events: none;
+  }
+  .hl-dot { position: absolute; left: 17%; top: 11%; width: 11%; height: 15%; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255,255,255,.92), transparent 72%); filter: blur(1px); z-index: 5; pointer-events: none;
+  }
+  .rim { position: absolute; left: 12%; bottom: 5%; width: 76%; height: 16%; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(160,190,255,.3), transparent 72%); filter: blur(4px); z-index: 5; pointer-events: none;
+  }
+  .ring { position: absolute; left: 50%; top: 50%; border-radius: 50%; pointer-events: none; z-index: 4;
+    border: 1.5px solid rgba(150,190,255,.38);
+  }
+  .ring.r1 { width: 88%; height: 34%; animation: spin 10s linear infinite; }
+  .ring.r2 { width: 66%; height: 52%; animation: spin 14s linear infinite reverse; }
+  @keyframes spin { from { transform: translate(-50%,-50%) rotate(0deg); } to { transform: translate(-50%,-50%) rotate(360deg); } }
+  .sphere.rolling .ring.r1 { animation-duration: 2.4s; border-color: rgba(185,215,255,.6); }
+  .sphere.rolling .ring.r2 { animation-duration: 3.6s; border-color: rgba(185,215,255,.5); }
+
+  /* 小球层：单个 canvas，sprite 烘焙渲染（替代 60 个 DOM 合成层） */
+  #ballsCanvas { position: absolute; inset: 0; width: 440px; height: 440px; border-radius: 50%; z-index: 3;
+    will-change: transform; /* 独立层：逐帧内容更新不触发父级（含大模糊阴影）重光栅化 */ }
+
+  /* 金属底座 + 蓝色LED环 */
+  .base i { position: absolute; border-radius: 50%; }
+  .b-neck  { left: -130px; top: 196px; width: 260px; height: 56px; z-index: 1;
+    background: radial-gradient(ellipse at 50% 30%, #39466e, #0d1430 75%);
+    box-shadow: inset 0 6px 10px rgba(0,0,20,.6), 0 8px 16px rgba(0,0,25,.5); }
+  .b-step1 { left: -205px; top: 226px; width: 410px; height: 58px; z-index: 1;
+    background: linear-gradient(180deg, #4a5878, #161e3c);
+    box-shadow: inset 0 4px 8px rgba(255,255,255,.15), 0 10px 22px rgba(0,0,25,.55); }
+  .b-led   { left: -230px; top: 272px; width: 460px; height: 56px; z-index: 1;
+    background: #0a1030; border: 3px solid #45c8ff;
+    box-shadow: 0 0 44px 10px rgba(60,170,255,.8), inset 0 0 26px rgba(60,170,255,.7); }
+  .b-step2 { left: -265px; top: 316px; width: 530px; height: 60px; z-index: 1;
+    background: linear-gradient(180deg, #1b2747, #070c24);
+    box-shadow: 0 16px 30px rgba(0,0,25,.6); }
+
+  /* ---------- 中奖球区（紧贴玻璃球右侧） ---------- */
+  .winner-zone { position: absolute; left: 1000px; top: 328px; width: 0; height: 0; z-index: 6; }
+  .winner-halo { position: absolute; left: -190px; top: -190px; width: 380px; height: 380px; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(255,170,200,.32), rgba(255,190,120,.14) 55%, transparent 72%);
+    filter: blur(6px); opacity: .45; transition: opacity .6s; pointer-events: none;
+  }
+  .winner-zone.show .winner-halo { opacity: 1; }
+  /* 脉冲光晕独立成层：box-shadow 静态烘焙，动画仅改 opacity（合成友好，避免逐帧重绘大模糊阴影） */
+  .winner-glow { position: absolute; left: -150px; top: -150px; width: 300px; height: 300px; border-radius: 50%;
+    box-shadow: 0 0 60px 20px rgba(255,130,180,.6), 0 0 150px 55px rgba(255,170,120,.28);
+    opacity: 0; transition: opacity .5s; pointer-events: none;
+    animation: winnerPulse 2.4s ease-in-out infinite; animation-play-state: paused;
+  }
+  .winner-zone.show .winner-glow { opacity: 1; animation-play-state: running; }
+  @keyframes winnerPulse { 0%,100% { opacity:.72; } 50% { opacity:1; } }
+  .winner-ball {
+    position: absolute; left: -105px; top: -105px; width: 210px; height: 210px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 900; letter-spacing: 3px;
+    text-shadow: 0 2px 3px rgba(255,255,255,.35);
+    background: radial-gradient(circle at 30% 26%, #fff 0%, rgba(255,255,255,.8) 8%, rgba(255,255,255,.22) 25%, #ff77b2 56%, #e0337e 100%);
+    box-shadow: inset -16px -22px 36px rgba(0,0,0,.22), inset 14px 16px 28px rgba(255,255,255,.5);
+    opacity: 0; transform: scale(.15);
+    transition: opacity .55s cubic-bezier(.2, 1.6, .4, 1), transform .55s cubic-bezier(.2, 1.6, .4, 1);
+  }
+  .winner-ball.show { opacity: 1; transform: scale(1); }
+  /* 星芒（隐藏时暂停动画，避免不可见元素持续占用合成/动画帧） */
+  #sparkles { position: absolute; left: 0; top: 0; opacity: 0; transition: opacity .5s; pointer-events: none; }
+  .winner-zone.show #sparkles { opacity: 1; }
+  .spk { position: absolute;
+    background: linear-gradient(180deg, #fffbe8, #ffd24e);
+    clip-path: polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%);
+    filter: drop-shadow(0 0 8px rgba(255,205,90,.95));
+    animation: twinkle 1.7s ease-in-out infinite; animation-play-state: paused;
+  }
+  .winner-zone.show .spk { animation-play-state: running; }
+  @keyframes twinkle {
+    0%,100% { transform: scale(.3) rotate(0deg); opacity: .15; }
+    50% { transform: scale(1.1) rotate(22deg); opacity: 1; }
+  }
+  /* 金色粒子流（隐藏时暂停） */
+  #goldStream { position: absolute; left: -160px; bottom: -70px; width: 320px; height: 350px;
+    opacity: 0; transition: opacity .6s; pointer-events: none; }
+  .winner-zone.show #goldStream { opacity: 1; }
+  .gs-dot { position: absolute; bottom: 0; border-radius: 50%;
+    background: radial-gradient(circle, #fff6c8, #ffca3e 60%, rgba(255,180,40,0));
+    animation: rise linear infinite; animation-play-state: paused;
+  }
+  .winner-zone.show .gs-dot { animation-play-state: running; }
+  @keyframes rise {
+    0% { transform: translateY(0) scale(.6); opacity: 0; }
+    12% { opacity: .95; }
+    100% { transform: translateY(-320px) scale(1.15); opacity: 0; }
+  }
+
+  /* ---------- 结果面板 ---------- */
+  .result-panel { position: absolute; left: 870px; top: 482px; width: 470px; height: 218px; z-index: 5;
+    border-radius: 22px; padding: 24px 30px 28px;
+    background: linear-gradient(180deg, #24338f, #151d66);
+    border: 2px solid rgba(255,214,110,.72);
+    box-shadow: 0 0 36px rgba(60,90,230,.55), 0 16px 36px rgba(0,0,25,.55), inset 0 0 30px rgba(90,120,255,.28);
+  }
+  .rp-header { display: flex; align-items: center; justify-content: center; gap: 14px;
+    color: #ffd75e; font-size: 29px; font-weight: 800; letter-spacing: 9px;
+    text-shadow: 0 2px 6px rgba(0,0,20,.7); }
+  .rp-header .st { font-size: 21px; letter-spacing: 0; text-shadow: 0 0 10px rgba(255,200,80,.8); }
+  .rp-header .ln { width: 54px; height: 2px; background: linear-gradient(90deg, transparent, #ffd75e); }
+  .rp-header .ln.r { background: linear-gradient(90deg, #ffd75e, transparent); }
+  .rp-card {
+    margin-top: 18px; height: 106px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center; gap: 30px;
+    background: linear-gradient(180deg, #fff7d6 0%, #ffe083 32%, #f2b93e 62%, #d99a26 100%);
+    border: 2px solid #fff0b0;
+    box-shadow: inset 0 3px 4px rgba(255,255,255,.9), inset 0 -7px 14px rgba(150,100,20,.55), 0 8px 18px rgba(0,0,25,.5);
+  }
+  .rp-card .star { color: #b8860b; font-size: 30px; text-shadow: 0 1px 0 #fff3c0; }
+  #resultName { font-size: 58px; color: #d01020; font-weight: 900; letter-spacing: 12px; text-indent: 12px;
+    text-shadow: 0 2px 0 rgba(255,255,255,.55); }
+  #resultName.wait { font-size: 38px; color: #b98a2e; letter-spacing: 10px; text-indent: 10px; font-weight: 800; }
+  #resultName.pop { animation: pop .55s cubic-bezier(.2, 1.6, .4, 1); }
+  @keyframes pop { 0% { transform: scale(.2); } 100% { transform: scale(1); } }
+
+  /* 飞行光轨 */
+  .trail { position: absolute; height: 110px; border-radius: 60px; z-index: 4; pointer-events: none;
+    background: linear-gradient(90deg, rgba(255,190,110,0), rgba(255,200,120,.75) 40%, rgba(255,244,210,.95));
+    filter: blur(7px); opacity: 0; transition: opacity .35s; transform-origin: left center;
+  }
+  .trail.show { opacity: .95; }
+
+  /* 飞行中的球（单元素 DOM，一次性动画，无性能压力） */
+  .fly { position: absolute; left: 0; top: 0; border-radius: 50%; z-index: 30;
+    display: flex; align-items: center; justify-content: center; font-weight: 900;
+    color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,.55);
+    background: radial-gradient(circle at 32% 26%, #ffffff 0%, rgba(255,255,255,.9) 7%, rgba(255,255,255,.18) 24%, var(--c) 56%, var(--cd) 100%);
+    box-shadow: 0 0 40px 10px rgba(255,220,150,.7), inset -9px -13px 20px rgba(0,0,0,.32), inset 7px 9px 14px rgba(255,255,255,.35);
+    will-change: transform; pointer-events: none;
+  }
+
+  /* ---------- 按钮（糖果质感） ---------- */
+  .controls { position: absolute; bottom: 34px; left: 0; right: 0; display: flex; justify-content: center; gap: 64px; z-index: 6; }
+  .btn {
+    display: flex; align-items: center; gap: 18px; height: 74px; padding: 0 46px;
+    border-radius: 18px; font-size: 31px; font-weight: 800; letter-spacing: 8px; color: #fff;
+    cursor: pointer; font-family: inherit; text-shadow: 0 2px 4px rgba(0,0,40,.55);
+    transition: transform .15s, opacity .2s;
+  }
+  .btn .ico { width: 40px; height: 40px; border-radius: 50%; border: 2.5px solid rgba(255,255,255,.95);
+    background: rgba(255,255,255,.16); display: grid; place-items: center; letter-spacing: 0; text-shadow: none; }
+  .ico-play { width: 0; height: 0; margin-left: 5px;
+    border-left: 14px solid #fff; border-top: 9px solid transparent; border-bottom: 9px solid transparent; }
+  .ico-stop { width: 15px; height: 15px; background: #fff; border-radius: 3px; }
+  .btn.start { background: linear-gradient(180deg, #7abbff 0%, #3d7bee 45%, #1e55c8 90%);
+    border: 2px solid #b8d7ff;
+    box-shadow: 0 0 30px rgba(80,150,255,.6), inset 0 4px 8px rgba(255,255,255,.6), inset 0 -10px 16px rgba(0,30,110,.55), 0 10px 22px rgba(0,0,25,.5); }
+  .btn.stop { background: linear-gradient(180deg, #ff9d75 0%, #f2503a 45%, #cc1f0e 90%);
+    border: 2px solid #ffc3ab;
+    box-shadow: 0 0 30px rgba(255,90,60,.55), inset 0 4px 8px rgba(255,255,255,.55), inset 0 -10px 16px rgba(130,10,0,.55), 0 10px 22px rgba(0,0,25,.5); }
+  .btn:not(:disabled):hover { transform: translateY(-3px) scale(1.03); }
+  .btn:not(:disabled):active { transform: scale(.96); }
+  .btn:disabled { opacity: .7; cursor: not-allowed; box-shadow: 0 6px 14px rgba(0,0,25,.4); }
+
+  /* ---------- 底部标语 ---------- */
+  footer { position: absolute; bottom: 14px; left: 42px; right: 42px; display: flex; justify-content: space-between; z-index: 5;
+    color: #e8ecff; font-size: 18px; letter-spacing: 3px; }
+  footer .f-item { display: flex; align-items: center; gap: 13px; text-shadow: 0 2px 6px rgba(0,0,20,.7); }
+  footer .f-ico { width: 38px; height: 38px; border-radius: 50%; border: 1.5px solid #ffd75e;
+    background: radial-gradient(circle at 35% 30%, rgba(255,220,120,.25), rgba(255,180,40,.06));
+    display: grid; place-items: center; box-shadow: 0 0 12px rgba(255,200,80,.35); }
+  footer svg { width: 21px; height: 21px; }
+</style>
+</head>
+<body>
+<canvas id="confetti"></canvas>
+
+<div class="stage" id="stage">
+  <div class="rays"></div>
+  <div class="beam l"></div>
+  <div class="beam r"></div>
+
+  <header>
+    <div class="title-row">
+      <svg class="laurel" viewBox="0 0 90 150">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ffe9a3"/><stop offset=".5" stop-color="#f2c94c"/><stop offset="1" stop-color="#c8871a"/>
+        </linearGradient></defs>
+        <path d="M70 146 C 26 116, 12 66, 27 6" stroke="url(#lg)" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <g fill="url(#lg)">
+          <path d="M62 136 Q 44 128 34 138 Q 50 146 62 136 Z"/><path d="M44 121 Q 26 114 17 125 Q 33 132 44 121 Z"/>
+          <path d="M30 103 Q 12 97 4 108 Q 20 115 30 103 Z"/><path d="M21 83 Q 4 78 -3 90 Q 12 96 21 83 Z"/>
+          <path d="M17 61 Q 1 57 -5 69 Q 9 74 17 61 Z"/><path d="M19 39 Q 4 36 -1 48 Q 12 52 19 39 Z"/>
+          <path d="M24 19 Q 10 15 6 27 Q 18 31 24 19 Z"/><path d="M60 128 Q 52 112 36 112 Q 44 128 60 128 Z"/>
+          <path d="M42 110 Q 34 95 19 96 Q 26 111 42 110 Z"/><path d="M29 92 Q 22 78 8 80 Q 14 94 29 92 Z"/>
+          <path d="M21 72 Q 15 58 2 61 Q 8 74 21 72 Z"/><path d="M18 50 Q 13 37 1 40 Q 6 52 18 50 Z"/>
+          <path d="M21 29 Q 17 16 6 19 Q 10 31 21 29 Z"/>
+        </g>
+      </svg>
+      <h1>幸运抽奖</h1>
+      <svg class="laurel r" viewBox="0 0 90 150">
+        <path d="M70 146 C 26 116, 12 66, 27 6" stroke="url(#lg)" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <g fill="url(#lg)">
+          <path d="M62 136 Q 44 128 34 138 Q 50 146 62 136 Z"/><path d="M44 121 Q 26 114 17 125 Q 33 132 44 121 Z"/>
+          <path d="M30 103 Q 12 97 4 108 Q 20 115 30 103 Z"/><path d="M21 83 Q 4 78 -3 90 Q 12 96 21 83 Z"/>
+          <path d="M17 61 Q 1 57 -5 69 Q 9 74 17 61 Z"/><path d="M19 39 Q 4 36 -1 48 Q 12 52 19 39 Z"/>
+          <path d="M24 19 Q 10 15 6 27 Q 18 31 24 19 Z"/><path d="M60 128 Q 52 112 36 112 Q 44 128 60 128 Z"/>
+          <path d="M42 110 Q 34 95 19 96 Q 26 111 42 110 Z"/><path d="M29 92 Q 22 78 8 80 Q 14 94 29 92 Z"/>
+          <path d="M21 72 Q 15 58 2 61 Q 8 74 21 72 Z"/><path d="M18 50 Q 13 37 1 40 Q 6 52 18 50 Z"/>
+          <path d="M21 29 Q 17 16 6 19 Q 10 31 21 29 Z"/>
+        </g>
+      </svg>
+    </div>
+    <div class="subtitle">
+      <span class="line"></span><span class="dot"></span>
+      点击开始抽奖，随机抽取一名幸运听众
+      <span class="dot"></span><span class="line r"></span>
+    </div>
+  </header>
+
+  <div class="machine" id="machine">
+    <div class="floor-glow"></div>
+    <div class="sphere-glow"></div>
+    <div class="arm l"></div>
+    <div class="arm r"></div>
+    <div class="sphere" id="sphere">
+      <canvas id="ballsCanvas" width="440" height="440"></canvas>
+      <i class="ring r1"></i>
+      <i class="ring r2"></i>
+      <i class="hl-streak"></i>
+      <i class="hl-dot"></i>
+      <i class="rim"></i>
+    </div>
+    <div class="base">
+      <i class="b-neck"></i><i class="b-step1"></i><i class="b-led"></i><i class="b-step2"></i>
+    </div>
+  </div>
+
+  <div class="trail" id="trail"></div>
+
+  <aside class="winner-zone" id="winnerZone">
+    <div class="winner-halo"></div>
+    <div class="winner-glow"></div>
+    <div class="winner-ball" id="winnerBall"><span id="winnerBallName"></span></div>
+    <div id="sparkles"></div>
+    <div id="goldStream"></div>
+  </aside>
+
+  <div class="result-panel">
+    <div class="rp-header"><span class="ln"></span><span class="st">★</span>抽奖结果<span class="st">★</span><span class="ln r"></span></div>
+    <div class="rp-card">
+      <span class="star">★</span><b id="resultName" class="wait">等待开奖</b><span class="star">★</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn" class="btn start">开始抽奖<span class="ico"><i class="ico-play"></i></span></button>
+    <button id="stopBtn" class="btn stop" disabled>停止抽奖<span class="ico"><i class="ico-stop"></i></span></button>
+  </div>
+
+  <footer>
+    <div class="f-item">
+      <span class="f-ico"><svg viewBox="0 0 24 24" fill="none" stroke="#ffd75e" stroke-width="1.7">
+        <path d="M4 11h16v9H4z M2.5 7.5h19V11h-19z M12 7.5V20 M12 7.5C8 7.5 6.8 3.6 9.3 3c2-.5 2.7 2.5 2.7 4.5 0-2 .7-5 2.7-4.5 2.5.6 1.3 4.5-2.7 4.5"/>
+      </svg></span>
+      培训赋能成长&nbsp;&nbsp;学习创造未来
+    </div>
+    <div class="f-item">
+      <span class="f-ico"><svg viewBox="0 0 24 24" fill="none" stroke="#ffd75e" stroke-width="1.7">
+        <path d="M7 4h10v5a5 5 0 0 1-10 0z M7 5H4a3 3 0 0 0 3.4 4 M17 5h3a3 3 0 0 1-3.4 4 M12 14v3 M9.5 20h5 M10 17h4v3h-4z"/>
+      </svg></span>
+      知识改变思维&nbsp;&nbsp;学习成就梦想
+    </div>
+  </footer>
+</div>
+
+<script>
+/* ================= 名单（已脱敏的演示名单） ================= */
+const NAMES = [
+  '幸运者01', '幸运者02', '幸运者03', '幸运者04', '幸运者05', '幸运者06', '幸运者07',
+  '幸运者08', '幸运者09', '幸运者10', '幸运者11', '幸运者12', '幸运者13',
+  '幸运者14', '幸运者15', '幸运者16', '幸运者17', '幸运者18', '幸运者19',
+  '幸运者20', '幸运者21', '幸运者22', '幸运者23', '幸运者24', '幸运者25',
+  '幸运者26', '幸运者27', '幸运者28', '幸运者29', '幸运者30', '幸运者31'
+].map(s => s.trim());
+
+/* 球体配色盘（循环取色，避免相邻同色） */
+const PALETTE = [
+  ['#4f8df9', '#1d4fc8'], ['#ffa03c', '#e06a00'], ['#ff77b2', '#e0337e'], ['#a76bff', '#6a2bd9'],
+  ['#4ed96b', '#1d9e3f'], ['#ff5a4e', '#c62828'], ['#ffd43e', '#dfa100'], ['#43c9f5', '#0f96ad'],
+  ['#cba5ff', '#8a5ce0'], ['#ffb3d1', '#e06a9c'], ['#5fe0c8', '#12a08c'], ['#ff8f5e', '#e05a10']
+];
+
+/* ================= 全局状态 ================= */
+const stage = document.getElementById('stage');
+const ballsCanvas = document.getElementById('ballsCanvas');
+const bctx = ballsCanvas.getContext('2d');
+const sphereEl = document.getElementById('sphere');
+const machineEl = document.getElementById('machine');
+const trail = document.getElementById('trail');
+const winnerZone = document.getElementById('winnerZone');
+const winnerBall = document.getElementById('winnerBall');
+const winnerBallName = document.getElementById('winnerBallName');
+const resultName = document.getElementById('resultName');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+
+/* 机器球心在舞台中的坐标 / 玻璃球半径 */
+const CX = 590, CY = 390, SPHERE_R = 220;
+/* 中奖球中心（舞台坐标） */
+const WX = 1000, WY = 328, WINNER_SIZE = 210;
+
+let state = 'idle';   // idle | rolling | drawing
+let scale = 1;
+let asleep = false;   // 静止休眠：跳过物理与重绘
+let sleepCounter = 0;
+const balls = [];
+
+/* ================= 舞台缩放适配（resize 合并到帧，重烘焙防抖） ================= */
+function applyScale() {
+  scale = Math.min(window.innerWidth / 1640, window.innerHeight / 930);
+  scale = Math.min(Math.max(scale, 0.4), 1.25);
+  document.documentElement.style.setProperty('--s', scale);
+}
+let resizeRAF = 0, bakeTimer = 0;
+function onResize() {
+  if (resizeRAF) return;
+  resizeRAF = requestAnimationFrame(() => {
+    resizeRAF = 0;
+    applyScale();
+    fitCanvas();
+    clearTimeout(bakeTimer);
+    bakeTimer = setTimeout(fitBallsCanvas, 150);
+  });
+}
+window.addEventListener('resize', onResize);
+
+/* ================= 小球 sprite 烘焙（外观一次性画进位图，运行时仅 drawImage） ================= */
+let K = 1; // 画布超采样倍率（dpr × 舞台缩放，钳制 1~1.75，控制逐帧纹理上传量）
+let baked = false; // 是否已烘焙 sprite
+function fitBallsCanvas() {
+  const k = Math.min(Math.max((window.devicePixelRatio || 1) * scale, 1), 1.75);
+  if (baked && Math.abs(k - K) < 0.01) return;
+  baked = true;
+  K = k;
+  ballsCanvas.width = ballsCanvas.height = Math.round(440 * K);
+  bctx.setTransform(K, 0, 0, K, 0, 0);
+  bakeAll();
+  drawBalls(); // 休眠时缓冲被重置也需重绘一次
+}
+
+function ballFontSize(name, r) {
+  const k = name.length <= 2 ? 0.58 : name.length === 3 ? 0.46 : 0.36;
+  return Math.max(Math.round(r * k), 10);
+}
+
+/* 烘焙单个小球位图：渐变球体 + 边缘暗环 + 左上亮环 + 高光斑 + 姓名 */
+function bakeSprite(name, color, r) {
+  const pad = 2;
+  const half = r + pad;
+  const size = Math.ceil(half * 2 * K);
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  g.scale(K, K);
+  const cx = half, cy = half;
+
+  // 球体主渐变（与原 CSS radial-gradient(circle at 32% 26%, ...) 等价）
+  const hx = cx - r * 0.36, hy = cy - r * 0.48;
+  const grad = g.createRadialGradient(hx, hy, 0, hx, hy, r * 2);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.07, 'rgba(255,255,255,.9)');
+  grad.addColorStop(0.24, 'rgba(255,255,255,.18)');
+  grad.addColorStop(0.56, color[0]);
+  grad.addColorStop(1, color[1]);
+  g.fillStyle = grad;
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
+
+  // 右下内阴影暗环
+  const dark = g.createRadialGradient(cx, cy, r * 0.68, cx, cy, r);
+  dark.addColorStop(0, 'rgba(0,0,0,0)');
+  dark.addColorStop(1, 'rgba(0,0,0,.34)');
+  g.fillStyle = dark;
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
+
+  // 左上内高光（inset 白光近似）
+  const lite = g.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+  lite.addColorStop(0, 'rgba(255,255,255,.30)');
+  lite.addColorStop(0.38, 'rgba(255,255,255,0)');
+  g.fillStyle = lite;
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill();
+
+  // 高光斑（原 .ball::after）
+  g.save();
+  g.translate(cx - r * 0.30, cy - r * 0.36);
+  g.scale(1, 0.68);
+  const spot = g.createRadialGradient(0, 0, 0, 0, 0, r * 0.24);
+  spot.addColorStop(0, 'rgba(255,255,255,.9)');
+  spot.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = spot;
+  g.beginPath(); g.arc(0, 0, r * 0.24, 0, Math.PI * 2); g.fill();
+  g.restore();
+
+  // 姓名（双层文字替代 shadowBlur：暗色偏移字 + 白字，快 5~10 倍）
+  if (name) {
+    const fs = ballFontSize(name, r);
+    g.font = '900 ' + fs + 'px "Microsoft YaHei", "PingFang SC", sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = 'rgba(0,0,0,.55)';
+    g.fillText(name, cx, cy + 3);
+    g.fillStyle = '#fff';
+    g.fillText(name, cx, cy + 1);
+  }
+  return { canvas: c, half };
+}
+
+function bakeAll() {
+  for (const b of balls) b.sp = bakeSprite(b.name, b.color, b.r);
+}
+
+/* ================= 创建小球 ================= */
+function makeBall(name, color, r) {
+  const ang = Math.random() * Math.PI * 2;
+  const dist = Math.random() * (SPHERE_R - r - 18);
+  balls.push({
+    r, name, color, sp: null,
+    x: SPHERE_R + Math.cos(ang) * dist,
+    y: SPHERE_R + Math.sin(ang) * dist * 0.55 + 55,
+    vx: 0, vy: 0
+  });
+}
+/* 根据人数自适应小球半径，保证球堆在玻璃球内分布均匀 */
+function ballRadiusFor(count) {
+  if (count <= 10) return 44;
+  if (count <= 16) return 38;
+  if (count <= 24) return 32;
+  if (count <= 36) return 27;
+  if (count <= 48) return 23;
+  return 20;
+}
+const BALL_R = ballRadiusFor(NAMES.length);
+NAMES.forEach((n, i) => makeBall(n, PALETTE[i % PALETTE.length], BALL_R + Math.floor(Math.random() * 5)));
+
+/* ================= 物理模拟（sweep-and-prune 碰撞 + 静止休眠） ================= */
+const MAX_R = BALL_R + 4;           // 最大球半径
+const SWEEP_W = MAX_R * 2 + 4;      // x 扫描带宽
+
+function physics() {
+  if (asleep) return;
+  const rolling = state === 'rolling';
+
+  // 1) 施力 + 积分 + 球壁约束
+  for (const b of balls) {
+    if (rolling) {
+      b.vx += (Math.random() - .5) * 2.8;
+      b.vy += (Math.random() - .5) * 2.8 - .6;
+      const dx = b.x - SPHERE_R, dy = b.y - SPHERE_R, d = Math.hypot(dx, dy) || 1;
+      b.vx += -dy / d * .65; b.vy += dx / d * .65;   // 漩涡
+    } else {
+      b.vy += .55; // 仅重力（静置时无微扰，便于休眠）
+    }
+    b.vx *= .986; b.vy *= .986;
+    const sp = Math.hypot(b.vx, b.vy), max = rolling ? 16 : 8;
+    if (sp > max) { b.vx *= max / sp; b.vy *= max / sp; }
+    b.x += b.vx; b.y += b.vy;
+    const dx = b.x - SPHERE_R, dy = b.y - SPHERE_R, d = Math.hypot(dx, dy), lim = SPHERE_R - b.r - 6;
+    if (d > lim) {
+      const nx = dx / d, ny = dy / d;
+      b.x = SPHERE_R + nx * lim; b.y = SPHERE_R + ny * lim;
+      const vn = b.vx * nx + b.vy * ny;
+      if (vn > 0) { b.vx -= 1.82 * vn * nx; b.vy -= 1.82 * vn * ny; }
+    }
+  }
+
+  // 2) 球间碰撞：按 x 排序后扫描（O(n·k)，替代 O(n²) 全对检测）
+  balls.sort((a, b) => a.x - b.x);
+  for (let i = 0; i < balls.length; i++) {
+    const a = balls[i];
+    for (let j = i + 1; j < balls.length; j++) {
+      const c = balls[j];
+      if (c.x - a.x > SWEEP_W) break; // 后续球更远，剪枝
+      const dx = c.x - a.x, dy = c.y - a.y, d = Math.hypot(dx, dy), min = a.r + c.r - 2;
+      if (d < min && d > .001) {
+        const nx = dx / d, ny = dy / d, ov = (min - d) / 2;
+        a.x -= nx * ov; a.y -= ny * ov; c.x += nx * ov; c.y += ny * ov;
+        const rvn = (c.vx - a.vx) * nx + (c.vy - a.vy) * ny;
+        if (rvn < 0) {
+          const imp = -1.85 * rvn / 2;
+          a.vx -= imp * nx; a.vy -= imp * ny; c.vx += imp * nx; c.vy += imp * ny;
+        }
+      }
+    }
+  }
+
+  // 3) 静止检测：非滚动状态下持续低速 → 休眠（跳过物理与重绘，直到唤醒）
+  if (!rolling) {
+    let maxV = 0;
+    for (const b of balls) {
+      const v = Math.abs(b.vx) + Math.abs(b.vy);
+      if (v > maxV) maxV = v;
+    }
+    if (maxV < 0.15) { if (++sleepCounter > 45) { asleep = true; } }
+    else sleepCounter = 0;
+  } else {
+    sleepCounter = 0;
+  }
+
+  drawBalls();
+}
+
+function wake() {
+  asleep = false;
+  sleepCounter = 0;
+}
+
+/* ================= 小球绘制（单 canvas，圆形裁剪 + sprite drawImage） ================= */
+function drawBalls() {
+  bctx.clearRect(0, 0, 440, 440);
+  bctx.save();
+  bctx.beginPath();
+  bctx.arc(SPHERE_R, SPHERE_R, SPHERE_R, 0, Math.PI * 2);
+  bctx.clip();
+  for (const b of balls) {
+    bctx.drawImage(b.sp.canvas, b.x - b.sp.half, b.y - b.sp.half, b.sp.half * 2, b.sp.half * 2);
+  }
+  bctx.restore();
+}
+
+/* ================= 星芒与金色粒子流 ================= */
+(function buildSparkles() {
+  const box = document.getElementById('sparkles');
+  for (let i = 0; i < 9; i++) {
+    const s = document.createElement('i');
+    s.className = 'spk';
+    const ang = (i / 9) * Math.PI * 2 + Math.random() * .5;
+    const dist = 118 + Math.random() * 46;
+    const size = 20 + Math.random() * 28;
+    s.style.width = s.style.height = size + 'px';
+    s.style.left = (Math.cos(ang) * dist - size / 2) + 'px';
+    s.style.top = (Math.sin(ang) * dist - size / 2) + 'px';
+    s.style.animationDelay = (Math.random() * 1.7).toFixed(2) + 's';
+    s.style.animationDuration = (1.3 + Math.random() * 1.1).toFixed(2) + 's';
+    box.appendChild(s);
+  }
+})();
+(function buildGoldStream() {
+  const box = document.getElementById('goldStream');
+  for (let i = 0; i < 26; i++) {
+    const d = document.createElement('i');
+    d.className = 'gs-dot';
+    const size = 5 + Math.random() * 4;
+    d.style.width = d.style.height = size + 'px';
+    d.style.left = (5 + Math.random() * 90) + '%';
+    d.style.animationDuration = (1.6 + Math.random() * 1.8).toFixed(2) + 's';
+    d.style.animationDelay = (Math.random() * 3).toFixed(2) + 's';
+    box.appendChild(d);
+  }
+})();
+
+/* ================= 中奖提示音（Web Audio 合成，零外部文件；失败静默降级） ================= */
+let audioCtx = null;
+function getAudioCtx() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  } catch (e) { return null; }
+}
+function playTone(ctx, freq, t0, dur, type, vol) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.05);
+  window.__toneCount = (window.__toneCount || 0) + 1; // 便于验证音效已触发
+}
+/* 飞行琶音：C5→E5→G5→C6 上行（期待感） */
+function playArpeggio() {
+  const ctx = getAudioCtx();
+  if (!ctx || ctx.state !== 'running') return;
+  const t = ctx.currentTime + 0.02;
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => playTone(ctx, f, t + i * 0.11, 0.42, 'triangle', 0.16));
+  playTone(ctx, 2093, t + 0.33, 0.3, 'sine', 0.06);
+}
+/* 揭晓和弦：C大调高位和弦绽放（喜庆宣告） */
+function playFanfare() {
+  const ctx = getAudioCtx();
+  if (!ctx || ctx.state !== 'running') return;
+  const t = ctx.currentTime + 0.02;
+  playTone(ctx, 523.25, t, 0.9, 'triangle', 0.09);
+  [1046.5, 1318.5, 1568].forEach((f, i) => playTone(ctx, f, t + 0.015 * i, 0.9, 'sine', 0.10));
+  playTone(ctx, 2093, t + 0.08, 0.7, 'sine', 0.07);
+}
+
+/* ================= 抽奖流程 ================= */
+function updateButtons() {
+  startBtn.disabled = state !== 'idle';
+  stopBtn.disabled = state !== 'rolling';
+}
+startBtn.addEventListener('click', () => {
+  if (state !== 'idle') return;
+  state = 'rolling';
+  wake();
+  sphereEl.classList.add('rolling');
+  machineEl.classList.add('rolling');
+  updateButtons();
+});
+stopBtn.addEventListener('click', () => {
+  if (state !== 'rolling') return;
+  getAudioCtx(); // 用户手势内预热音频，解锁自动播放策略
+  state = 'drawing';
+  updateButtons();
+  setTimeout(launchWinner, 480);
+});
+
+function textColorFor(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  return lum > 150 ? '#3a0d24' : '#ffffff';
+}
+function winnerFont(name) {
+  return (name.length <= 2 ? 58 : name.length === 3 ? 46 : 38) + 'px';
+}
+
+function launchWinner() {
+  const named = balls.filter(b => b.name);
+  const b = named[Math.floor(Math.random() * named.length)];
+  playArpeggio(); // 球飞出：上行琶音
+
+  /* 球在玻璃球画布内坐标 → 舞台坐标（画布与 .sphere 同 inset:0） */
+  const sx = CX - SPHERE_R + b.x, sy = CY - SPHERE_R + b.y;
+
+  /* 光轨：从玻璃球右缘到中奖球位置 */
+  const ox = CX + SPHERE_R + 28, oy = CY - 62;
+  const ang = Math.atan2(WY - oy, WX - ox);
+  const len = Math.hypot(WX - ox, WY - oy) + 70;
+  trail.style.left = ox + 'px'; trail.style.top = (oy - 55) + 'px';
+  trail.style.width = len + 'px';
+  trail.style.transform = `rotate(${ang}rad)`;
+  trail.classList.add('show');
+
+  /* 飞行球（DOM 单元素 + WAAPI，结束即移除） */
+  const fly = document.createElement('div');
+  fly.className = 'fly';
+  fly.style.width = fly.style.height = b.r * 2 + 'px';
+  fly.style.fontSize = ballFontSize(b.name, b.r) + 'px';
+  fly.style.color = textColorFor(b.color[0]);
+  fly.style.setProperty('--c', b.color[0]);
+  fly.style.setProperty('--cd', b.color[1]);
+  fly.textContent = b.name;
+  stage.appendChild(fly);
+  const endScale = WINNER_SIZE / (b.r * 2);
+  const anim = fly.animate([
+    { transform: `translate(${sx - b.r}px, ${sy - b.r}px) scale(1)` },
+    { transform: `translate(${(sx + WX) / 2 - b.r}px, ${Math.min(sy, WY) - 150 - b.r}px) scale(1.3)`, offset: .5 },
+    { transform: `translate(${WX - b.r * endScale}px, ${WY - b.r * endScale}px) scale(${endScale})` }
+  ], { duration: 980, easing: 'cubic-bezier(.3,.6,.25,1)', fill: 'forwards' });
+  anim.onfinish = () => {
+    fly.remove();
+    showWinner(b);
+    trail.classList.remove('show');
+    state = 'idle';
+    sphereEl.classList.remove('rolling');
+    machineEl.classList.remove('rolling');
+    updateButtons();
+    wake(); // 球堆恢复物理，自然回落稳定后再次休眠
+  };
+}
+
+function showWinner(b) {
+  playFanfare(); // 中奖揭晓：和弦绽放
+  winnerBall.style.background =
+    `radial-gradient(circle at 30% 26%, #fff 0%, rgba(255,255,255,.8) 8%, rgba(255,255,255,.22) 25%, ${b.color[0]} 56%, ${b.color[1]} 100%)`;
+  winnerBallName.textContent = b.name;
+  winnerBallName.style.fontSize = winnerFont(b.name);
+  winnerBallName.style.color = textColorFor(b.color[0]);
+  winnerBall.classList.remove('show');
+  winnerZone.classList.remove('show');
+  void winnerBall.offsetWidth;
+  winnerBall.classList.add('show');
+  winnerZone.classList.add('show');
+
+  resultName.textContent = b.name;
+  resultName.classList.remove('wait', 'pop');
+  void resultName.offsetWidth;
+  resultName.classList.add('pop');
+
+  const wRect = winnerBall.getBoundingClientRect();
+  burst(wRect.left + wRect.width / 2, wRect.top + wRect.height / 2);
+}
+
+/* ================= 彩带（环境飘落 + 中奖爆发；粒子无可绘制时整帧跳过） ================= */
+const cvs = document.getElementById('confetti');
+const ctx = cvs.getContext('2d');
+let W, H, dpr;
+function fitCanvas() {
+  dpr = Math.min(window.devicePixelRatio || 1, 1.5); // 上限 1.5：纸屑为小装饰，降低全屏纹理每帧上传开销
+  W = window.innerWidth; H = window.innerHeight;
+  cvs.width = W * dpr; cvs.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+fitCanvas();
+
+const CF_COLORS = ['#ffd75e', '#ff5252', '#b06bff', '#4d8dff', '#ff7ab8', '#5fe0c8', '#ffa62e'];
+const ambient = [], burstP = [];
+for (let i = 0; i < 66; i++) ambient.push(newAmbient(true));
+function newAmbient(anyY) {
+  return {
+    x: Math.random() * W, y: anyY ? Math.random() * H : -26,
+    w: 7 + Math.random() * 8, h: 10 + Math.random() * 9,
+    c: CF_COLORS[Math.floor(Math.random() * CF_COLORS.length)],
+    rot: Math.random() * Math.PI, vr: (Math.random() - .5) * .12,
+    vy: .8 + Math.random() * 1.6, ph: Math.random() * Math.PI * 2, sw: .4 + Math.random() * 1.2,
+    circle: Math.random() < .3, alpha: .75 + Math.random() * .25
+  };
+}
+function burst(x, y) {
+  for (let i = 0; i < 170; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 3 + Math.random() * 9.5;
+    burstP.push({
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 3.2,
+      w: 7 + Math.random() * 8, h: 10 + Math.random() * 9,
+      c: CF_COLORS[Math.floor(Math.random() * CF_COLORS.length)],
+      rot: Math.random() * Math.PI, vr: (Math.random() - .5) * .32, life: 160,
+      circle: Math.random() < .3, alpha: 1
+    });
+  }
+}
+function drawConfetti() {
+  ctx.clearRect(0, 0, W, H);
+  for (const p of ambient) {
+    p.ph += .016 * p.sw; p.x += Math.sin(p.ph) * .9; p.y += p.vy; p.rot += p.vr;
+    if (p.y > H + 26) Object.assign(p, newAmbient(false));
+    drawPiece(p);
+  }
+  for (let i = burstP.length - 1; i >= 0; i--) {
+    const p = burstP[i];
+    p.vy += .22; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.life--;
+    if (p.life <= 0 || p.y > H + 30) { burstP.splice(i, 1); continue; }
+    p.alpha = Math.min(1, p.life / 40);
+    drawPiece(p);
+  }
+}
+/* setTransform 直达目标矩阵，避免每粒子 save/restore */
+function drawPiece(p) {
+  ctx.globalAlpha = p.alpha;
+  ctx.setTransform(dpr, 0, 0, dpr, p.x, p.y);
+  ctx.rotate(p.rot);
+  ctx.fillStyle = p.c;
+  if (p.circle) {
+    ctx.beginPath();
+    ctx.arc(0, 0, p.w / 2, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h * Math.abs(Math.sin(p.rot * 1.4)) + 2);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+/* ================= 主循环 ================= */
+function loop() {
+  physics();
+  drawConfetti();
+  requestAnimationFrame(loop);
+}
+applyScale();
+fitCanvas();
+fitBallsCanvas();
+updateButtons();
+loop();
+</script>
+</body>
+</html>
