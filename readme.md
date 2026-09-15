@@ -4,8 +4,8 @@ created: 2026-08-30
 project: AG-Agent/choujiang
 ---
 
-# 抽奖页面开发记录（choujiang 项目，已脱敏）
-
+# 抽奖页面开发记录（choujiang 项目）
+![image.jpg](images/image.jpg)
 ## 任务
 
 按设计图高保真开发单文件 HTML 抽奖页面（`choujiang/index.html`，零外部依赖）：玻璃球内带匿名编号的彩球滚动，开始/停止按钮控制，停止后随机弹出中奖编号球。真实名单已移除，当前仅使用脱敏演示数据。
